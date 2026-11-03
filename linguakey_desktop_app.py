@@ -4,6 +4,7 @@ import random
 import urllib.parse
 import urllib.request
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import ttk, messagebox
 
 # --- CONFIGURATION & CONSTANTS ---
@@ -79,6 +80,13 @@ class LinguaKeyApp(tk.Tk):
         self.title("LinguaKey - Desktop Language Tracker")
         self.geometry("850x650")
         self.minsize(750, 550)
+        self.ui_font_family = self.get_smooth_font_family()
+        self.font_size_offset = 0
+        self.font_size_offset_min = -4
+        self.font_size_offset_max = 8
+        self.font_min_size = 8
+        self.font_max_size = 42
+        self._font_cache = {}
 
         self.db_manager = DataManager()
         self.current_user = None
@@ -86,11 +94,80 @@ class LinguaKeyApp(tk.Tk):
         self.quiz_direction = "foreign_to_native" # or 'native_to_foreign'
         self.current_quiz_word = None
 
+        self.bind_font_resize_shortcuts()
+        self.apply_global_font_style()
+
         # Build Navigation & Screen Container
         self.container = ttk.Frame(self)
         self.container.pack(fill="both", expand=True)
 
         self.show_user_selection_screen()
+
+    def get_smooth_font_family(self):
+        preferred_families = [
+            "Segoe UI",
+            "SF Pro Text",
+            "San Francisco",
+            "Helvetica Neue",
+            "Noto Sans",
+            "Ubuntu",
+            "Cantarell",
+            "DejaVu Sans",
+            "Arial",
+        ]
+        available_families = set(tkfont.families(self))
+        for family in preferred_families:
+            if family in available_families:
+                return family
+        return "TkDefaultFont"
+
+    def get_scaled_font_size(self, base_size):
+        scaled = base_size + self.font_size_offset
+        return max(self.font_min_size, min(self.font_max_size, scaled))
+
+    def ui_font(self, size, weight="normal"):
+        key = (size, weight)
+        if key not in self._font_cache:
+            self._font_cache[key] = tkfont.Font(
+                self,
+                family=self.ui_font_family,
+                size=self.get_scaled_font_size(size),
+                weight=weight,
+            )
+        return self._font_cache[key]
+
+    def apply_global_font_style(self):
+        default_font = self.ui_font(10)
+        self.option_add("*Font", default_font)
+
+        style = ttk.Style(self)
+        style.configure(".", font=default_font)
+        style.configure("Treeview.Heading", font=self.ui_font(10, "bold"))
+
+    def bind_font_resize_shortcuts(self):
+        self.bind_all("<Control-plus>", self.increase_font_size, add="+")
+        self.bind_all("<Control-equal>", self.increase_font_size, add="+")
+        self.bind_all("<Control-KP_Add>", self.increase_font_size, add="+")
+        self.bind_all("<Control-minus>", self.decrease_font_size, add="+")
+        self.bind_all("<Control-KP_Subtract>", self.decrease_font_size, add="+")
+
+    def increase_font_size(self, event=None):
+        self.adjust_font_size(1)
+        return "break"
+
+    def decrease_font_size(self, event=None):
+        self.adjust_font_size(-1)
+        return "break"
+
+    def adjust_font_size(self, delta):
+        next_offset = self.font_size_offset + delta
+        next_offset = max(self.font_size_offset_min, min(self.font_size_offset_max, next_offset))
+        if next_offset == self.font_size_offset:
+            return
+
+        self.font_size_offset = next_offset
+        for (base_size, _weight), font_obj in self._font_cache.items():
+            font_obj.configure(size=self.get_scaled_font_size(base_size))
 
     def clear_container(self):
         for widget in self.container.winfo_children():
@@ -105,14 +182,14 @@ class LinguaKeyApp(tk.Tk):
         frame = ttk.Frame(self.container, padding="30")
         frame.place(relx=0.5, rely=0.5, anchor="center")
 
-        ttk.Label(frame, text="LinguaKey", font=("Helvetica", 24, "bold")).pack(pady=10)
-        ttk.Label(frame, text="Select or Create User Profile", font=("Helvetica", 12)).pack(pady=5)
+        ttk.Label(frame, text="LinguaKey", font=self.ui_font(24, "bold")).pack(pady=10)
+        ttk.Label(frame, text="Select or Create User Profile", font=self.ui_font(12)).pack(pady=5)
 
         users = self.db_manager.get_users()
         
         # Select Existing User
         if users:
-            ttk.Label(frame, text="Select Existing User:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(15, 2))
+            ttk.Label(frame, text="Select Existing User:", font=self.ui_font(10, "bold")).pack(anchor="w", pady=(15, 2))
             user_var = tk.StringVar(value=users[0])
             user_dropdown = ttk.Combobox(frame, textvariable=user_var, values=users, state="readonly", width=30)
             user_dropdown.pack(pady=5)
@@ -126,7 +203,7 @@ class LinguaKeyApp(tk.Tk):
             ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=15)
 
         # Create New User
-        ttk.Label(frame, text="Create New User:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        ttk.Label(frame, text="Create New User:", font=self.ui_font(10, "bold")).pack(anchor="w", pady=(5, 2))
         new_user_entry = ttk.Entry(frame, width=32)
         new_user_entry.pack(pady=5)
 
@@ -152,14 +229,14 @@ class LinguaKeyApp(tk.Tk):
         frame = ttk.Frame(self.container, padding="30")
         frame.place(relx=0.5, rely=0.5, anchor="center")
 
-        ttk.Label(frame, text=f"Welcome, {self.current_user}!", font=("Helvetica", 18, "bold")).pack(pady=5)
-        ttk.Label(frame, text="Select or Create a Language Pair", font=("Helvetica", 11)).pack(pady=5)
+        ttk.Label(frame, text=f"Welcome, {self.current_user}!", font=self.ui_font(18, "bold")).pack(pady=5)
+        ttk.Label(frame, text="Select or Create a Language Pair", font=self.ui_font(11)).pack(pady=5)
 
         pairs = self.db_manager.get_language_pairs(self.current_user)
 
         # Select Existing Pair
         if pairs:
-            ttk.Label(frame, text="Select Existing Pair:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(15, 2))
+            ttk.Label(frame, text="Select Existing Pair:", font=self.ui_font(10, "bold")).pack(anchor="w", pady=(15, 2))
             pair_var = tk.StringVar(value=pairs[0])
             pair_dropdown = ttk.Combobox(frame, textvariable=pair_var, values=pairs, state="readonly", width=35)
             pair_dropdown.pack(pady=5)
@@ -172,7 +249,7 @@ class LinguaKeyApp(tk.Tk):
             ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=15)
 
         # Create New Pair
-        ttk.Label(frame, text="Create New Language Pair:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        ttk.Label(frame, text="Create New Language Pair:", font=self.ui_font(10, "bold")).pack(anchor="w", pady=(5, 2))
 
         known_frame = ttk.Frame(frame)
         known_frame.pack(fill="x", pady=2)
@@ -218,7 +295,7 @@ class LinguaKeyApp(tk.Tk):
         top_bar.pack(fill="x")
 
         info_text = f"User: {self.current_user}  |  Profile: {self.current_pair}"
-        ttk.Label(top_bar, text=info_text, font=("Helvetica", 10, "bold")).pack(side="left")
+        ttk.Label(top_bar, text=info_text, font=self.ui_font(10, "bold")).pack(side="left")
         ttk.Button(top_bar, text="Switch Profile / Language", command=self.show_language_selection_screen).pack(side="right")
 
         # Tab Control
@@ -272,7 +349,7 @@ class LinguaKeyApp(tk.Tk):
         search_frame = ttk.Frame(self.tab_add)
         search_frame.pack(fill="x", pady=10)
 
-        self.lookup_entry = ttk.Entry(search_frame, font=("Helvetica", 12))
+        self.lookup_entry = ttk.Entry(search_frame, font=self.ui_font(12))
         self.lookup_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.lookup_entry.bind("<Return>", lambda event: self.perform_lookup())
 
@@ -284,7 +361,7 @@ class LinguaKeyApp(tk.Tk):
         self.res_frame.pack(fill="both", expand=True, pady=10)
 
         ttk.Label(self.res_frame, text="Foreign Word (Primary Key):").grid(row=0, column=0, sticky="w", pady=2)
-        self.res_word_entry = ttk.Entry(self.res_frame, width=50, font=("Helvetica", 10, "bold"))
+        self.res_word_entry = ttk.Entry(self.res_frame, width=50, font=self.ui_font(10, "bold"))
         self.res_word_entry.grid(row=1, column=0, sticky="ew", pady=(0, 10))
 
         ttk.Label(self.res_frame, text="Translations (comma-separated):").grid(row=2, column=0, sticky="w", pady=2)
@@ -416,14 +493,14 @@ class LinguaKeyApp(tk.Tk):
         self.card_frame = ttk.LabelFrame(self.tab_quiz, text=" Flashcard ", padding="20")
         self.card_frame.pack(fill="both", expand=True, pady=10)
 
-        self.prompt_label = ttk.Label(self.card_frame, text="", font=("Helvetica", 22, "bold"), anchor="center")
+        self.prompt_label = ttk.Label(self.card_frame, text="", font=self.ui_font(22, "bold"), anchor="center")
         self.prompt_label.pack(pady=15)
 
-        self.answer_entry = ttk.Entry(self.card_frame, font=("Helvetica", 14), justify="center")
+        self.answer_entry = ttk.Entry(self.card_frame, font=self.ui_font(14), justify="center")
         self.answer_entry.pack(pady=10, ipady=4)
         self.answer_entry.bind("<Return>", lambda e: self.check_quiz_answer())
 
-        self.feedback_label = ttk.Label(self.card_frame, text="", font=("Helvetica", 11), wraplength=500, justify="center")
+        self.feedback_label = ttk.Label(self.card_frame, text="", font=self.ui_font(11), wraplength=500, justify="center")
         self.feedback_label.pack(pady=10)
 
         self.btn_check = ttk.Button(self.card_frame, text="Check Answer", command=self.check_quiz_answer)
@@ -526,12 +603,16 @@ class LinguaKeyApp(tk.Tk):
 
         # Context Menu
         self.context_menu = tk.Menu(self, tearoff=0)
+        self.context_menu_visible = False
         self.context_menu.add_command(label="Mark as Learned", command=self.context_mark_learned)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Delete Word", command=self.context_delete_word)
 
         self.tree.bind("<Button-3>", self.show_context_menu) # Right click Windows/Linux
         self.tree.bind("<Button-2>", self.show_context_menu) # Right click macOS
+        if not hasattr(self, "_left_click_handler_bound"):
+            self.bind_all("<Button-1>", self.on_left_click_anywhere, add="+")
+            self._left_click_handler_bound = True
 
         # Style tag for learned rows
         self.tree.tag_configure("learned", background="#d1e7dd")
@@ -561,10 +642,21 @@ class LinguaKeyApp(tk.Tk):
         if item:
             self.tree.selection_set(item)
             self.selected_word_ctx = item
+            self.context_menu.unpost()
             self.context_menu.post(event.x_root, event.y_root)
+            self.context_menu_visible = True
+
+    def on_left_click_anywhere(self, event):
+        if not self.context_menu_visible:
+            return
+        if event.widget == self.context_menu:
+            return
+        self.context_menu.unpost()
+        self.context_menu_visible = False
 
     def context_mark_learned(self):
         if hasattr(self, 'selected_word_ctx'):
+            self.context_menu_visible = False
             words_db = self.get_current_pair_data()["words"]
             if self.selected_word_ctx in words_db:
                 words_db[self.selected_word_ctx]["learned"] = True
@@ -573,6 +665,7 @@ class LinguaKeyApp(tk.Tk):
 
     def context_delete_word(self):
         if hasattr(self, 'selected_word_ctx'):
+            self.context_menu_visible = False
             words_db = self.get_current_pair_data()["words"]
             if self.selected_word_ctx in words_db:
                 del words_db[self.selected_word_ctx]
@@ -587,24 +680,24 @@ class LinguaKeyApp(tk.Tk):
 
         self.card_total = ttk.LabelFrame(cards_frame, text=" Total Guesses ", padding="15")
         self.card_total.pack(side="left", fill="both", expand=True, padx=5)
-        self.lbl_total = ttk.Label(self.card_total, text="0", font=("Helvetica", 20, "bold"))
+        self.lbl_total = ttk.Label(self.card_total, text="0", font=self.ui_font(20, "bold"))
         self.lbl_total.pack()
 
         self.card_rate = ttk.LabelFrame(cards_frame, text=" Overall Success ", padding="15")
         self.card_rate.pack(side="left", fill="both", expand=True, padx=5)
-        self.lbl_rate = ttk.Label(self.card_rate, text="0%", font=("Helvetica", 20, "bold"))
+        self.lbl_rate = ttk.Label(self.card_rate, text="0%", font=self.ui_font(20, "bold"))
         self.lbl_rate.pack()
 
         self.card_learned = ttk.LabelFrame(cards_frame, text=" Learned Words ", padding="15")
         self.card_learned.pack(side="left", fill="both", expand=True, padx=5)
-        self.lbl_learned = ttk.Label(self.card_learned, text="0", font=("Helvetica", 20, "bold"))
+        self.lbl_learned = ttk.Label(self.card_learned, text="0", font=self.ui_font(20, "bold"))
         self.lbl_learned.pack()
 
         # Hardest Words Section
         hard_frame = ttk.LabelFrame(self.tab_stats, text=" Top 5 Hardest Words (Randomized Tie-Breaker) ", padding="15")
         hard_frame.pack(fill="both", expand=True, pady=10)
 
-        self.hard_listbox = tk.Listbox(hard_frame, font=("Helvetica", 11), borderwidth=0, highlightthickness=0)
+        self.hard_listbox = tk.Listbox(hard_frame, font=self.ui_font(11), borderwidth=0, highlightthickness=0)
         self.hard_listbox.pack(fill="both", expand=True)
 
     def refresh_statistics(self):
