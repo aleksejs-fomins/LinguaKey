@@ -1,11 +1,12 @@
 import os
 import json
 import random
+import csv
 import urllib.parse
 import urllib.request
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 
 # --- CONFIGURATION & CONSTANTS ---
 DATA_FILE = "linguakey_data.json"
@@ -141,15 +142,17 @@ class LinguaKeyApp(tk.Tk):
         self.option_add("*Font", default_font)
 
         style = ttk.Style(self)
+        row_height = self.ui_font(10).metrics("linespace") + 8
         style.configure(".", font=default_font)
+        style.configure("Treeview", font=default_font, rowheight=row_height)
         style.configure("Treeview.Heading", font=self.ui_font(10, "bold"))
 
     def bind_font_resize_shortcuts(self):
-        self.bind_all("<Control-plus>", self.increase_font_size, add="+")
-        self.bind_all("<Control-equal>", self.increase_font_size, add="+")
-        self.bind_all("<Control-KP_Add>", self.increase_font_size, add="+")
-        self.bind_all("<Control-minus>", self.decrease_font_size, add="+")
-        self.bind_all("<Control-KP_Subtract>", self.decrease_font_size, add="+")
+        self.bind("<Control-plus>", self.increase_font_size, add="+")
+        self.bind("<Control-equal>", self.increase_font_size, add="+")
+        self.bind("<Control-KP_Add>", self.increase_font_size, add="+")
+        self.bind("<Control-minus>", self.decrease_font_size, add="+")
+        self.bind("<Control-KP_Subtract>", self.decrease_font_size, add="+")
 
     def increase_font_size(self, event=None):
         self.adjust_font_size(1)
@@ -168,6 +171,7 @@ class LinguaKeyApp(tk.Tk):
         self.font_size_offset = next_offset
         for (base_size, _weight), font_obj in self._font_cache.items():
             font_obj.configure(size=self.get_scaled_font_size(base_size))
+        self.apply_global_font_style()
 
     def clear_container(self):
         for widget in self.container.winfo_children():
@@ -372,9 +376,119 @@ class LinguaKeyApp(tk.Tk):
         self.res_sent_text = tk.Text(self.res_frame, height=4, width=50)
         self.res_sent_text.grid(row=5, column=0, sticky="ew", pady=(0, 10))
 
-        ttk.Button(self.res_frame, text="Approve & Save to Database", command=self.approve_word).grid(row=6, column=0, sticky="e")
+        buttons_frame = ttk.Frame(self.res_frame)
+        buttons_frame.grid(row=6, column=0, sticky="e")
+        ttk.Button(buttons_frame, text="Import CSV", command=self.import_csv_words).pack(side="left", padx=(0, 6))
+        ttk.Button(buttons_frame, text="Approve & Save to Database", command=self.approve_word).pack(side="left")
 
         self.res_frame.columnconfigure(0, weight=1)
+
+        # Add-word log
+        log_frame = ttk.LabelFrame(self.tab_add, text=" Add/Import Log ", padding="8")
+        log_frame.pack(fill="both", expand=False, pady=(0, 5))
+
+        self.add_log_text = tk.Text(log_frame, height=7, wrap="word", state="disabled")
+        self.add_log_text.pack(side="left", fill="both", expand=True)
+        log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.add_log_text.yview)
+        log_scroll.pack(side="right", fill="y")
+        self.add_log_text.configure(yscrollcommand=log_scroll.set)
+
+        self.add_log_text.tag_configure("success", foreground="#1b5e20")
+        self.add_log_text.tag_configure("error", foreground="#7f1d1d")
+        self.add_log_text.tag_configure("info", foreground="#1f2937")
+
+    def log_add_operation(self, message, level="info"):
+        if not hasattr(self, "add_log_text"):
+            return
+        tag = "info"
+        if level == "success":
+            tag = "success"
+        elif level == "error":
+            tag = "error"
+
+        self.add_log_text.config(state="normal")
+        self.add_log_text.insert(tk.END, f"{message}\n", tag)
+        self.add_log_text.see(tk.END)
+        self.add_log_text.config(state="disabled")
+
+    def find_word_conflict(self, known_word, target_word, words_db):
+        known_lower = known_word.lower()
+        target_lower = target_word.lower()
+
+        for existing_target, data in words_db.items():
+            existing_target_lower = existing_target.lower()
+            existing_translations = [t.lower() for t in data.get("translations", [])]
+
+            if target_lower == existing_target_lower:
+                return f"target word '{target_word}' already exists as '{existing_target}'"
+            if known_lower in existing_translations:
+                return f"known word '{known_word}' already exists in translations of '{existing_target}'"
+            if known_lower == existing_target_lower:
+                return f"known word '{known_word}' already exists as a target word"
+            if target_lower in existing_translations:
+                return f"target word '{target_word}' already exists in translations of '{existing_target}'"
+        return None
+
+    def import_csv_words(self):
+        file_path = filedialog.askopenfilename(
+            title="Import CSV Word Pairs",
+            filetypes=[("CSV files", "*.csv *.CSV")],
+        )
+        if not file_path:
+            return
+        if not file_path.lower().endswith(".csv"):
+            self.log_add_operation("Import failed: only .CSV files are allowed.", "error")
+            return
+
+        words_db = self.get_current_pair_data()["words"]
+        imported_count = 0
+
+        try:
+            with open(file_path, "r", encoding="utf-8-sig", newline="") as csv_file:
+                reader = csv.reader(csv_file, delimiter=";")
+                for row_num, row in enumerate(reader, start=1):
+                    if len(row) != 2:
+                        self.log_add_operation(
+                            f"Row {row_num}: expected exactly 2 columns separated by ';' — skipped.",
+                            "error",
+                        )
+                        continue
+
+                    known_word = row[0].strip()
+                    target_word = row[1].strip()
+
+                    if not known_word or not target_word:
+                        self.log_add_operation(
+                            f"Row {row_num}: empty word value found — skipped.",
+                            "error",
+                        )
+                        continue
+
+                    conflict_reason = self.find_word_conflict(known_word, target_word, words_db)
+                    if conflict_reason:
+                        self.log_add_operation(f"Row {row_num}: {conflict_reason} — pair skipped.", "error")
+                        continue
+
+                    words_db[target_word] = {
+                        "translations": [known_word],
+                        "sentences": [],
+                        "attempts": 0,
+                        "successes": 0,
+                        "learned": False
+                    }
+                    imported_count += 1
+                    self.log_add_operation(
+                        f"Row {row_num}: imported '{known_word}' -> '{target_word}'.",
+                        "success",
+                    )
+
+            self.db_manager.save_data()
+            if imported_count == 0:
+                self.log_add_operation("Import finished: no new words were imported.", "error")
+            else:
+                self.log_add_operation(f"Import finished: {imported_count} word pairs imported.", "success")
+        except Exception as e:
+            self.log_add_operation(f"Import failed: {e}", "error")
 
     def perform_lookup(self):
         query = self.lookup_entry.get().strip()
@@ -446,16 +560,27 @@ class LinguaKeyApp(tk.Tk):
         sent_str = self.res_sent_text.get("1.0", tk.END).strip()
 
         if not foreign_word or not trans_str:
-            messagebox.showwarning("Warning", "Both Foreign Word and Translations are required.")
+            self.log_add_operation("Add failed: both Foreign Word and Translations are required.", "error")
             return
 
         words_db = self.get_current_pair_data()["words"]
 
-        if foreign_word in words_db:
-            messagebox.showwarning("Warning", f"'{foreign_word}' already exists in database.")
+        translations = [t.strip() for t in trans_str.split(",") if t.strip()]
+        if not translations:
+            self.log_add_operation("Add failed: at least one translation is required.", "error")
             return
 
-        translations = [t.strip() for t in trans_str.split(",") if t.strip()]
+        conflict_reason = self.find_word_conflict(translations[0], foreign_word, words_db)
+        if conflict_reason:
+            self.log_add_operation(f"Add failed: {conflict_reason}.", "error")
+            return
+
+        for translation in translations[1:]:
+            conflict_reason = self.find_word_conflict(translation, foreign_word, words_db)
+            if conflict_reason:
+                self.log_add_operation(f"Add failed: {conflict_reason}.", "error")
+                return
+
         sentences = [s.strip() for s in sent_str.split("\n") if s.strip()]
 
         words_db[foreign_word] = {
@@ -467,7 +592,7 @@ class LinguaKeyApp(tk.Tk):
         }
 
         self.db_manager.save_data()
-        messagebox.showinfo("Success", f"Word '{foreign_word}' successfully added to database!")
+        self.log_add_operation(f"Added '{foreign_word}' with {len(translations)} translation(s).", "success")
 
         # Clear UI
         self.lookup_entry.delete(0, tk.END)
@@ -611,7 +736,7 @@ class LinguaKeyApp(tk.Tk):
         self.tree.bind("<Button-3>", self.show_context_menu) # Right click Windows/Linux
         self.tree.bind("<Button-2>", self.show_context_menu) # Right click macOS
         if not hasattr(self, "_left_click_handler_bound"):
-            self.bind_all("<Button-1>", self.on_left_click_anywhere, add="+")
+            self.bind("<Button-1>", self.on_left_click_anywhere, add="+")
             self._left_click_handler_bound = True
 
         # Style tag for learned rows
